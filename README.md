@@ -11,6 +11,8 @@ This repository demonstrates the execution speed of a **Histogram Equalization**
 1.  **Pure JavaScript (JS):** Running directly in the browser's main thread.
 2.  **WebAssembly (Wasm):** C++ code compiled with Emscripten, executing near-native speed.
 
+Vibe coded with gemini :D
+
 
 ---
 
