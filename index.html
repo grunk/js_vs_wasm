@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Égalisation d'Histogramme (JS vs WASM)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            text-align: center;
+            background-color: #f4f4f4;
+            color: #333;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #444;
+        }
+
+        #drop-zone {
+            border: 3px dashed #ccc;
+            border-radius: 10px;
+            width: 80%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 50px;
+            background-color: #fff;
+            transition: all 0.3s ease;
+        }
+
+        #drop-zone.dragover {
+            border-color: #007bff;
+            background-color: #e9f5ff;
+        }
+
+        #drop-zone p {
+            margin: 0;
+            font-size: 1.2em;
+            color: #aaa;
+        }
+
+        #image-container {
+            margin-top: 20px;
+        }
+
+        #image-display {
+            display: none;
+            max-width: 500px;
+            height: auto;
+            border: 1px solid #ddd;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .enhance-button {
+            display: none; /* Caché initialement */
+            margin-top: 20px;
+            margin-left: 10px;
+            margin-right: 10px;
+            padding: 12px 25px;
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        #enhance-button-js {
+            background-color: #007bff;
+        }
+        #enhance-button-js:hover {
+            background-color: #0056b3;
+        }
+        
+        #enhance-button-wasm {
+            background-color: #6f42c1;
+        }
+        #enhance-button-wasm:hover {
+            background-color: #5a34a0;
+        }
+
+        #enhance-button-wasm:disabled {
+            background-color: #aaa;
+            cursor: not-allowed;
+        }
+
+    </style>
+    
+    <!-- 
+      CORRECTION:
+      Charge le "glue code" JS généré par Emscripten.
+      Il doit être chargé AVANT le script principal qui l'appelle.
+    -->
+    <script src="histogram.js"></script>
+
+</head>
+<body>
+    <h1>Traitement d'image (JS vs WASM)</h1>
+
+    <div id="drop-zone">
+        <p>Glissez & déposez votre image ici</p>
+    </div>
+
+    <div id="image-container">
+        <img id="image-display" src="" alt="Image déposée" />
+        
+        <div>
+            <button id="enhance-button-js" class="enhance-button">Enhance (JS)</button>
+            <button id="enhance-button-wasm" class="enhance-button">Enhance (WASM)</button>
+        </div>
+    </div>
+
+    <script>
+        // L'écouteur d'événement est "async"
+        document.addEventListener('DOMContentLoaded', async () => {
+
+            // --- Définition des variables ---
+            const dropZone = document.getElementById('drop-zone');
+            const imageDisplay = document.getElementById('image-display');
+            const enhanceButtonJS = document.getElementById('enhance-button-js');
+            const enhanceButtonWASM = document.getElementById('enhance-button-wasm');
+            const dropZoneText = dropZone.querySelector('p');
+            
+            let originalImageSrc = null; 
+            
+            // CORRECTION: Ces variables sont maintenant dans la portée principale 
+            // de DOMContentLoaded pour être accessibles partout.
+            let wasmModule = null;
+            let wasmEnhance = null; 
+
+            // --- Logique de chargement WASM (CORRIGÉE) ---
+            
+            enhanceButtonWASM.disabled = true;
+            enhanceButtonWASM.textContent = "Chargement WASM...";
+
+            try {
+                // Appelle createModule() et stocke le résultat
+                wasmModule = await createModule();
+                
+                console.log("Module WASM chargé et initialisé.");
+                
+                // Prépare la fonction C
+                wasmEnhance = wasmModule.cwrap(
+                    'applyHistogramEqualization', 
+                    null,                         
+                    ['number', 'number', 'number']
+                );
+                
+                // Active le bouton
+                enhanceButtonWASM.disabled = false;
+                enhanceButtonWASM.textContent = "Enhance (WASM)";
+                
+                if(imageDisplay.src) {
+                     enhanceButtonWASM.style.display = 'inline-block';
+                }
+
+            } catch (e) {
+                console.error("Erreur lors du chargement ou wrapping WASM:", e);
+                enhanceButtonWASM.textContent = "Erreur WASM";
+            }
+            
+            // --- Gestion du Drag and Drop ---
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+
+            dropZone.addEventListener('dragover', () => dropZone.classList.add('dragover'));
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
+            dropZone.addEventListener('drop', (e) => {
+                dropZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                
+                if (files.length > 0 && files[0].type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        originalImageSrc = event.target.result; 
+                        imageDisplay.src = originalImageSrc;
+                        imageDisplay.style.display = 'block';
+                        
+                        enhanceButtonJS.style.display = 'inline-block';
+                        if (wasmEnhance) { // (wasmEnhance est défini si le module a chargé)
+                            enhanceButtonWASM.style.display = 'inline-block';
+                        }
+                        
+                        dropZoneText.style.display = 'none';
+                        dropZone.style.padding = "20px";
+                        dropZone.style.borderStyle = "solid";
+                    };
+                    reader.readAsDataURL(files[0]);
+                } else {
+                    alert("Veuillez déposer un fichier image valide !");
+                }
+            });
+
+            // --- Bouton 1: Égalisation JS ---
+
+            enhanceButtonJS.addEventListener('click', () => {
+                if (!originalImageSrc) return;
+                
+                imageDisplay.src = originalImageSrc; 
+                enhanceButtonJS.disabled = true;
+                enhanceButtonJS.textContent = "Traitement (JS)...";
+
+                setTimeout(() => {
+                    console.group("Performance Analyse (JavaScript)");
+                    try {
+                        const equalizedSrc = applyHistogramEqualizationJS(imageDisplay);
+                        imageDisplay.src = equalizedSrc;
+                    } catch (error) {
+                        console.error("Erreur (JS):", error);
+                    } finally {
+                        console.groupEnd();
+                        enhanceButtonJS.disabled = false;
+                        enhanceButtonJS.textContent = "Enhance (JS)";
+                    }
+                }, 10);
+            });
+            
+            // --- Bouton 2: Égalisation WASM ---
+            
+            enhanceButtonWASM.addEventListener('click', () => {
+                // Vérifie que 'wasmModule' et 'wasmEnhance' sont prêts
+                if (!originalImageSrc || !wasmModule || !wasmEnhance) return;
+                
+                imageDisplay.src = originalImageSrc; 
+                enhanceButtonWASM.disabled = true;
+                enhanceButtonWASM.textContent = "Traitement (WASM)...";
+
+                setTimeout(() => {
+                    try {
+                        console.group("Performance Analyse (WebAssembly)");
+                        console.time("WASM: 1. Dessin Canvas + GetImageData");
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = imageDisplay.naturalWidth;
+                        canvas.height = imageDisplay.naturalHeight;
+                        ctx.drawImage(imageDisplay, 0, 0, canvas.width, canvas.height);
+                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const dataArray = imageData.data;
+                        console.timeEnd("WASM: 1. Dessin Canvas + GetImageData"); 
+
+                        console.time("WASM: Malloc + Copie JS->WASM");
+                        // 2. Allouer la mémoire (en utilisant l'objet 'wasmModule' stocké)
+                        const dataPtr = wasmModule._malloc(dataArray.length);
+                        
+                        // 3. Copier les données JS vers WASM
+                        wasmModule.HEAPU8.set(dataArray, dataPtr);
+                        console.timeEnd("WASM: Malloc + Copie JS->WASM");
+                        console.time("WASM: 2b. Appel Fonction Enhance (C++)");
+                        // 4. Appeler la fonction C++ (via la fonction 'wrappée')
+                        wasmEnhance(dataPtr, canvas.width, canvas.height);
+                        console.timeEnd("WASM: 2b. Appel Fonction Enhance (C++)");
+                        console.time("WASM: 2c. Copie WASM->JS + Free");
+                        // 5. Récupérer les données modifiées
+                        const resultData = new Uint8ClampedArray(wasmModule.HEAPU8.buffer, dataPtr, dataArray.length);
+
+                        // 6. Mettre à jour l'imageData
+                        imageData.data.set(resultData);
+
+                        // 7. Libérer la mémoire WASM
+                        wasmModule._free(dataPtr);
+                        console.timeEnd("WASM: 2c. Copie WASM->JS + Free");
+                        // 8. Mettre à jour le canvas et l'image
+                        ctx.putImageData(imageData, 0, 0);
+                        imageDisplay.src = canvas.toDataURL();
+
+                    } catch (error) {
+                        console.error("Erreur lors du traitement WASM:", error);
+                        alert("Une erreur est survenue lors du traitement WASM.");
+                    } finally {
+                        console.groupEnd();
+                        enhanceButtonWASM.disabled = false;
+                        enhanceButtonWASM.textContent = "Enhance (WASM)";
+                    }
+                }, 10);
+            });
+
+
+            // =======================================================
+            // FONCTION D'ÉGALISATION JAVASCRIPT (INCHANGÉE)
+            // =======================================================
+            function applyHistogramEqualizationJS(imgElement) {
+                console.time("JS: 1. Dessin Canvas + GetImageData");
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = imgElement.naturalWidth;
+                canvas.height = imgElement.naturalHeight;
+                ctx.drawImage(imgElement, 0, 0, canvas.width, canvas.height);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                console.timeEnd("JS: 1. Dessin Canvas + GetImageData");
+                console.time("JS: 2. Traitement (Égalisation)");
+                const data = imageData.data;
+                const totalPixels = canvas.width * canvas.height;
+                const histR = new Array(256).fill(0);
+                const histG = new Array(256).fill(0);
+                const histB = new Array(256).fill(0);
+                for (let i = 0; i < data.length; i += 4) {
+                    histR[data[i]]++;
+                    histG[data[i + 1]]++;
+                    histB[data[i + 2]]++;
+                }
+                const lutR = createLutJS(histR, totalPixels);
+                const lutG = createLutJS(histG, totalPixels);
+                const lutB = createLutJS(histB, totalPixels);
+                for (let i = 0; i < data.length; i += 4) {
+                    data[i] = lutR[data[i]];
+                    data[i + 1] = lutG[data[i + 1]];
+                    data[i + 2] = lutB[data[i + 2]];
+                }
+                console.timeEnd("JS: 2. Traitement (Égalisation)");
+                ctx.putImageData(imageData, 0, 0);
+                        
+                return canvas.toDataURL();
+            }
+            function createLutJS(histogram, totalPixels) {
+                const cdf = new Array(256).fill(0);
+                const lut = new Array(256).fill(0);
+                cdf[0] = histogram[0];
+                for (let i = 1; i < 256; i++) {
+                    cdf[i] = cdf[i - 1] + histogram[i];
+                }
+                const cdfMin = cdf.find(val => val > 0);
+                if (cdfMin === undefined) return lut;
+                const denominator = totalPixels - cdfMin;
+                if (denominator === 0) {
+                    for(let i=0; i<256; i++) { lut[i] = i; }
+                    return lut;
+                }
+                const scale = 255 / denominator;
+                for (let i = 0; i < 256; i++) {
+                    const mappedValue = ((cdf[i] - cdfMin) * scale);
+                    lut[i] = Math.round(Math.max(0, Math.min(255, mappedValue)));
+                }
+                return lut;
+            }
+            
+        });
+    </script>
+</body>
+</html>
+

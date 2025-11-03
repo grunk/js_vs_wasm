@@ -1,0 +1,1 @@
+emcc -O3 histogram_wasm.cpp -o ../histogram.js -s WASM=1 -s "EXPORTED_RUNTIME_METHODS=['cwrap', 'setValue', 'getValue', 'HEAPU8']" -s "ALLOW_MEMORY_GROWTH=1" -s "MODULARIZE=1" -s "EXPORT_NAME='createModule'" -s "EXPORTED_FUNCTIONS=['_malloc', '_free']"

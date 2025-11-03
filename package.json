@@ -1,0 +1,14 @@
+{
+  "name": "histo_js_vs_wasm",
+  "version": "1.0.0",
+  "description": "Comparaison of js vs wasm performance",
+  "main": "index.html",
+  "scripts": {
+    "start": "serve"
+  },
+  "author": "Olivier Roger",
+  "license": "ISC",
+  "devDependencies": {
+    "serve": "^14.2.5"
+  }
+}
